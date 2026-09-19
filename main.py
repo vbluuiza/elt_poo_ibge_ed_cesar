@@ -32,21 +32,28 @@ def main() -> None:
     loader = Loader()
 
     try:
-        logger.info("Etapa 1/3: extraindo dados da API do IBGE")
-        data = extract.pnadc(variavel=VARIAVEL_TAXA_DESOCUPACAO, estado=UF_PERNAMBUCO)
-        loader.load_mongo(data, MONGO_DB, MONGO_COLLECTION)
+        logger.info("Etapa 1/5: extraindo dados da API do IBGE")
+        raw = extract.pnadc(variavel=VARIAVEL_TAXA_DESOCUPACAO, estado=UF_PERNAMBUCO)
 
-        logger.info("Etapa 2/3: transformando os dados")
+        logger.info("Etapa 2/5: salvando dados brutos no MongoDB Atlas")
+        loader.load_mongo(raw, MONGO_DB, MONGO_COLLECTION)
+
+        logger.info("Etapa 3/5: recuperando dados do MongoDB Atlas")
+        data = extract.extract_collection_from_mongo(MONGO_DB, MONGO_COLLECTION)
+
+        logger.info("Etapa 4/5: transformando os dados")
         df = transformer.transform_pnadc(data)
 
-        logger.info("Etapa 3/3: salvando no SQLite")
-        loader.load_sqlite(df)
+        logger.info("Etapa 5/5: salvando no NeonDB")
+        loader.load_neon(df)
+        # loader.load_sqlite(df)
 
         logger.info("Pipeline concluído com sucesso (%d registros)", len(df))
     except Exception:
         logger.exception("Falha na execução do pipeline")
         raise
     finally:
+        extract.close()
         loader.close()
 
 

@@ -7,6 +7,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
+from sqlalchemy import create_engine
+
 
 load_dotenv()
 
@@ -21,6 +23,8 @@ class Loader:
         self.client = MongoClient(self.mongo_uri, server_api=ServerApi("1"))
         self.sqlite_path = "data/ibge.db"
         self.sqlite_table = "pnadc"
+        self.neon_uri = os.getenv("NEON_URI")
+        self.neon_table = "pnadc"
 
     def close(self) -> None:
         """Encerra a conexão com o MongoDB."""
@@ -28,6 +32,14 @@ class Loader:
 
 
     def load_json(self, path: str, data: Any) -> None:
+        """
+        Salva os dados em um arquivo JSON local, criando as pastas
+        necessárias.
+
+        Atributos:
+            path: caminho do arquivo JSON de destino
+            data: dados a serem gravados (qualquer estrutura serializável)
+        """
         file_path = Path(path)
         
         file_path.parent.mkdir(
@@ -50,6 +62,7 @@ class Loader:
         """
         collection = self.client[db_name][collection_name]
 
+        collection.delete_many({})
         if data:
             collection.insert_many(data)
 
@@ -69,3 +82,22 @@ class Loader:
             df.to_sql(self.sqlite_table, conn, if_exists="replace", index=False)
 
         print(f"Dados salvos com sucesso na tabela '{self.sqlite_table}' do SQLite!")
+
+    def load_neon(self, df: pd.DataFrame) -> None:
+        """
+        Salva o DataFrame transformado em uma tabela do NeonDB (PostgreSQL
+        em nuvem), substituindo a tabela caso ela já exista.
+
+        Atributos:
+            df: DataFrame já limpo e organizado (saída do Transformer)
+        """
+        if not self.neon_uri:
+            raise ValueError("Variável NEON_URI não definida no .env")
+
+        engine = create_engine(self.neon_uri)
+        try:
+            df.to_sql(self.neon_table, engine, if_exists="replace", index=False)
+        finally:
+            engine.dispose()
+
+        print(f"Dados salvos com sucesso na tabela '{self.neon_table}' do NeonDB!")

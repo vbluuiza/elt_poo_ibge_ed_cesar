@@ -1,4 +1,11 @@
+import os
+
 import requests
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from pymongo.server_api import ServerApi
+
+load_dotenv()
 
 
 class Extract:
@@ -80,6 +87,26 @@ class Extract:
         self.periodo_inicio_padrao = "201201"
         self.periodo_fim_padrao = "202602"
         self.classificacao_padrao = "2[all]"
+        self.mongo_uri = os.getenv("MONGODB_URI")
+        self.client = MongoClient(self.mongo_uri, server_api=ServerApi("1"))
+
+    def close(self) -> None:
+        """Encerra a conexão com o MongoDB."""
+        self.client.close()
+
+    def extract_collection_from_mongo(
+        self, db_name: str, collection_name: str
+    ) -> list[dict]:
+        """
+        Recupera do MongoDB Atlas os documentos brutos gravados na etapa
+        de carga, para servirem de entrada da transformação.
+
+        Atributos:
+            db_name: nome do banco de dados no MongoDB
+            collection_name: nome da coleção a ser lida
+        """
+        collection = self.client[db_name][collection_name]
+        return list(collection.find({}, {"_id": 0}))
 
     def agregado(
         self,
