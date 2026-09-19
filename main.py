@@ -1,30 +1,54 @@
+"""
+Pipeline ETL da PNAD Contínua (IBGE).
+
+Extrai a série histórica de uma variável da API de agregados do IBGE,
+guarda o resultado bruto no MongoDB, transforma os dados em um DataFrame
+e persiste o resultado final em uma tabela SQLite.
+"""
+
+import logging
+
 from src.extract import Extract
 from src.load import Loader
+from src.transform import Transformer
 
-extract = Extract(
-    agregado=4093,
-    localidade="N3[26]"
-)
+VARIAVEL_TAXA_DESOCUPACAO = 4099
+UF_PERNAMBUCO = 26
+MONGO_DB = "IBGE"
+MONGO_COLLECTION = "PNADC"
 
-data = extract.extract(
-    periodos=["201201|201202|201203|201204|"
-            "201301|201302|201303|201304|"
-            "201401|201402|201403|201404|"
-            "201501|201502|201503|201504|"
-            "201601|201602|201603|201604|"
-            "201701|201702|201703|201704|"
-            "201801|201802|201803|201804|"
-            "201901|201902|201903|201904|"
-            "202001|202002|202003|202004|"
-            "202101|202102|202103|202104|"
-            "202201|202202|202203|202204|"
-            "202301|202302|202303|202304|"
-            "202401|202402|202403|202404|"
-            "202501|202502|202503|202504|"
-            "202601|202602"],
-    variaveis=[4096, 4099, 12466],
-    classificacao=2,
-    categorias=[6794]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%H:%M:%S",
 )
-loader = Loader()
-loader.load_json("data/raw/pnadc.json", data)
+logger = logging.getLogger(__name__)
+
+
+def main() -> None:
+    """Executa o pipeline ETL completo: extração, carga bruta, transformação e carga final."""
+    extract = Extract()
+    transformer = Transformer()
+    loader = Loader()
+
+    try:
+        logger.info("Etapa 1/3: extraindo dados da API do IBGE")
+        data = extract.pnadc(variavel=VARIAVEL_TAXA_DESOCUPACAO, estado=UF_PERNAMBUCO)
+        loader.load_mongo(data, MONGO_DB, MONGO_COLLECTION)
+
+        logger.info("Etapa 2/3: transformando os dados")
+        df = transformer.transform_pnadc(data)
+
+        logger.info("Etapa 3/3: salvando no SQLite")
+        loader.load_sqlite(df)
+
+        logger.info("Pipeline concluído com sucesso (%d registros)", len(df))
+    except Exception:
+        logger.exception("Falha na execução do pipeline")
+        raise
+    finally:
+        loader.close()
+
+
+if __name__ == "__main__":
+    main()

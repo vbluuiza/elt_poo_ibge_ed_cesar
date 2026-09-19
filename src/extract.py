@@ -1,49 +1,148 @@
 import requests
 
+
 class Extract:
-    def __init__(self,
-        agregado: int,
-        localidade: str
-    ):
+    """
+    Responsável por extrair dados de agregados da API de agregados do
+    IBGE (SIDRA). O método `agregado` é genérico e pode ser reutilizado
+    para qualquer agregado do IBGE; `pnadc` é um atalho já configurado
+    para o agregado 4093 (PNAD Contínua).
+    """
+
+    UFS = {
+        11: "Rondônia",
+        12: "Acre",
+        13: "Amazonas",
+        14: "Roraima",
+        15: "Pará",
+        16: "Amapá",
+        17: "Tocantins",
+        21: "Maranhão",
+        22: "Piauí",
+        23: "Ceará",
+        24: "Rio Grande do Norte",
+        25: "Paraíba",
+        26: "Pernambuco",
+        27: "Alagoas",
+        28: "Sergipe",
+        29: "Bahia",
+        31: "Minas Gerais",
+        32: "Espírito Santo",
+        33: "Rio de Janeiro",
+        35: "São Paulo",
+        41: "Paraná",
+        42: "Santa Catarina",
+        43: "Rio Grande do Sul",
+        50: "Mato Grosso do Sul",
+        51: "Mato Grosso",
+        52: "Goiás",
+        53: "Distrito Federal",
+    }
+
+    VARIAVEIS_PNADC = {
+        1641: "Pessoas de 14 anos ou mais de idade",
+        4087: "Coeficiente de variação - Pessoas de 14 anos ou mais de idade",
+        4104: "Distribuição percentual das pessoas de 14 anos ou mais de idade",
+        4105: "Coeficiente de variação - Distribuição percentual das pessoas de 14 anos ou mais de idade",
+        4088: "Pessoas de 14 anos ou mais de idade, na força de trabalho, na semana de referência",
+        4089: "Coeficiente de variação - Pessoas de 14 anos ou mais de idade, na força de trabalho",
+        4106: "Distribuição percentual das pessoas de 14 anos ou mais de idade, na força de trabalho",
+        4107: "Coeficiente de variação - Distribuição percentual das pessoas de 14 anos ou mais de idade, na força de trabalho",
+        4090: "Pessoas de 14 anos ou mais de idade ocupadas na semana de referência",
+        4091: "Coeficiente de variação - Pessoas de 14 anos ou mais de idade ocupadas",
+        4108: "Distribuição percentual das pessoas de 14 anos ou mais de idade ocupadas",
+        4109: "Coeficiente de variação - Distribuição percentual das pessoas de 14 anos ou mais de idade ocupadas",
+        4092: "Pessoas de 14 anos ou mais de idade, desocupadas na semana de referência",
+        4093: "Coeficiente de variação - Pessoas de 14 anos ou mais de idade, desocupadas",
+        4110: "Distribuição percentual das pessoas de 14 anos ou mais de idade, desocupadas",
+        4111: "Coeficiente de variação - Distribuição percentual das pessoas de 14 anos ou mais de idade, desocupadas",
+        4094: "Pessoas de 14 anos ou mais de idade, fora da força de trabalho",
+        4095: "Coeficiente de variação - Pessoas de 14 anos ou mais de idade, fora da força de trabalho",
+        4112: "Distribuição percentual das pessoas de 14 anos ou mais de idade, fora da força de trabalho",
+        4113: "Coeficiente de variação - Distribuição percentual das pessoas de 14 anos ou mais de idade, fora da força de trabalho",
+        4096: "Taxa de participação na força de trabalho",
+        4100: "Coeficiente de variação - Taxa de participação na força de trabalho",
+        4097: "Nível da ocupação",
+        4101: "Coeficiente de variação - Nível da ocupação",
+        4098: "Nível da desocupação",
+        4102: "Coeficiente de variação - Nível de desocupação",
+        4099: "Taxa de desocupação",
+        4103: "Coeficiente de variação - Taxa de desocupação",
+        12466: "Taxa de informalidade das pessoas de 14 anos ou mais de idade ocupadas",
+        12467: "Coeficiente de variação - Taxa de informalidade das pessoas ocupadas",
+        4723: "Pessoas de 14 anos ou mais de idade ocupadas, em situação de informalidade",
+        4724: "Coeficiente de variação - Pessoas de 14 anos ou mais de idade ocupadas, em situação de informalidade",
+    }
+
+    def __init__(self):
         self.base_url = "https://servicodados.ibge.gov.br/api/v3/agregados"
-        self.agregado = agregado
-        self.localidade = localidade
-    
-    def build_url(self, 
-        periodos: list[str],
-        variaveis: list[int], 
-        classificacao: int, 
-        categorias: list[int]
-    ) -> str:
-        
-        periodos_url = "|".join(periodos)
-        variaveis_url = "|".join(map(str, variaveis))
-        categorias_url = "|".join(map(str, categorias))
-        
-        return (
-            f"{self.base_url}/4093"
-            f"/periodos/{periodos_url}"
-            f"/variaveis/{variaveis_url}"
-            f"?localidades=N3[26]"
-            f"&classificacao={classificacao}[{categorias_url}]"
+        self.agregado_pnadc = 4093
+        self.periodo_inicio_padrao = "201201"
+        self.periodo_fim_padrao = "202602"
+        self.classificacao_padrao = "2[all]"
+
+    def agregado(
+        self,
+        agregado_id: int,
+        variavel: int,
+        estado: int,
+        periodo_inicio: str,
+        periodo_fim: str,
+        classificacao: str | None = None,
+    ) -> list[dict]:
+        """
+        Busca, na API de agregados do IBGE, a série histórica de uma
+        variável de um agregado (tabela) qualquer, para uma UF.
+
+        Atributos:
+            agregado_id: código do agregado (tabela) do IBGE
+            variavel: código da variável do agregado
+            estado: código IBGE da UF (ver `Extract.UFS`)
+            periodo_inicio: início do período da série, no formato AAAAMM
+            periodo_fim: fim do período da série, no formato AAAAMM
+            classificacao: classificação/categoria da consulta (padrão: `self.classificacao_padrao`)
+        """
+        if estado not in self.UFS:
+            raise ValueError(f"Código de UF inválido: {estado}")
+
+        classificacao = classificacao or self.classificacao_padrao
+
+        url = (
+            f"{self.base_url}/{agregado_id}/periodos/{periodo_inicio}-{periodo_fim}"
+            f"/variaveis/{variavel}?localidades=N3[{estado}]&classificacao={classificacao}"
         )
-        
-    def extract(self, 
-        periodos: list[str],
-        variaveis: list[int], 
-        classificacao: int, 
-        categorias: list[int]
-    ):
-        
-        url = self.build_url(
-            periodos,
-            variaveis,
-            classificacao,
-            categorias
-        )
-    
         response = requests.get(url)
         response.raise_for_status()
         
         return response.json()
 
+    def pnadc(
+        self,
+        variavel: int,
+        estado: int,
+        periodo_inicio: str | None = None,
+        periodo_fim: str | None = None,
+    ) -> list[dict]:
+        """
+        Busca, no agregado da PNAD Contínua, a série histórica de uma
+        variável para uma UF, em um período (por padrão, o definido em
+        `self.periodo_inicio_padrao` e `self.periodo_fim_padrao`).
+
+        Atributos:
+            variavel: código da variável do agregado (ver `Extract.VARIAVEIS_PNADC`)
+            estado: código IBGE da UF (ver `Extract.UFS`)
+            periodo_inicio: início do período da série, no formato AAAAMM
+            periodo_fim: fim do período da série, no formato AAAAMM
+        """
+        if variavel not in self.VARIAVEIS_PNADC:
+            raise ValueError(
+                f"Código de variável inválido para o agregado {self.agregado_pnadc}: {variavel}"
+            )
+
+        return self.agregado(
+            agregado_id=self.agregado_pnadc,
+            variavel=variavel,
+            estado=estado,
+            periodo_inicio=periodo_inicio or self.periodo_inicio_padrao,
+            periodo_fim=periodo_fim or self.periodo_fim_padrao,
+        )
