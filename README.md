@@ -2,6 +2,9 @@
 
 Projeto desenvolvido para a disciplina de **Engenharia de Dados e Big Data** do curso de **Análise e Desenvolvimento de Sistemas (ADS)** da **CESAR School**.
 
+## Integrante
+* Maria Luiza Vieira Belo | 4º Período Regular
+
 Pipeline ETL que consome a [API de agregados do IBGE (SIDRA)](https://servicodados.ibge.gov.br/api/docs/agregados?versao=3), com dados da **PNAD Contínua** (agregado 4093). Por padrão, extrai a **taxa de desocupação** (variável 4099) de **Pernambuco**, de 2012 a 2026.
 
 ## Arquitetura
@@ -80,6 +83,4 @@ sqlite3 data/ibge.db "SELECT * FROM pnadc LIMIT 5;"
 - [x] Docstring em todos os métodos públicos.
 - [x] Funcionamento completo testado: resposta bruta na coleção `PNADC` do Atlas e 58 registros na tabela `pnadc` do NeonDB.
 
-## Integrante
 
-* Maria Luiza Vieira Belo | 4º Período Regular
