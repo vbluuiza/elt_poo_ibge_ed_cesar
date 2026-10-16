@@ -1,0 +1,4 @@
+# Astro Runtime já inclui pandas, SQLAlchemy e requests; aqui ficam só as dependências extras do ETL
+pymongo
+python-dotenv
+psycopg2-binary

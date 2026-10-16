@@ -1,0 +1,11 @@
+astro
+.git
+.env
+airflow_settings.yaml
+logs/
+.venv
+airflow.db
+airflow.cfg
+data/
+__pycache__/
+.DS_Store

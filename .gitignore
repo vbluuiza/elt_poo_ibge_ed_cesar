@@ -57,3 +57,16 @@ dmypy.json
 
 # pytype static type analyzer
 .pytype/
+
+# Astro / Airflow
+airflow_settings.yaml
+astro
+.astro/standalone/
+.astro/worktrees/
+.astro/*.local.yml
+.astro/*.local.yaml
+airflow-webserver.pid
+webserver_config.py
+airflow.cfg
+airflow.db
+logs/

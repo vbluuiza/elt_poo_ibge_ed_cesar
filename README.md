@@ -71,6 +71,43 @@ O `data/ibge.db` versionado é o SQLite gerado na primeira entrega, e permite ve
 sqlite3 data/ibge.db "SELECT * FROM pnadc LIMIT 5;"
 ```
 
+## Orquestração com Airflow (Astronomer)
+
+A pipeline também roda orquestrada pelo [Apache Airflow](https://airflow.apache.org/), usando o [Astro CLI](https://www.astronomer.io/docs/astro/cli/overview) da Astronomer, que sobe o Airflow localmente em containers Docker. A DAG `ibge_pnadc_etl` (`dags/ibge_etl_dag.py`) transforma cada etapa do `main.py` em uma task, chamando os mesmos métodos das classes `Extract`, `Transformer` e `Loader`:
+
+```
+extrair_api ──► carregar_mongo ──► extrair_mongo ──► transformar ──► carregar_neon ──► validar_neon
+```
+
+| Task | O que faz |
+|---|---|
+| `extrair_api` | Busca a série na API do IBGE (`Extract.pnadc`). |
+| `carregar_mongo` | Grava o dado bruto no MongoDB Atlas (`Loader.load_mongo`). |
+| `extrair_mongo` | Recupera o dado bruto do Atlas (`Extract.extract_collection_from_mongo`). |
+| `transformar` | Converte o JSON em `DataFrame` (`Transformer.transform_pnadc`). |
+| `carregar_neon` | Grava o `DataFrame` no NeonDB (`Loader.load_neon`). |
+| `validar_neon` | Confere se a tabela `pnadc` do NeonDB tem a quantidade de registros carregada; falha caso contrário. |
+
+Os dados passam de uma task para a outra por XCom. Cada task tem 2 *retries*, com 1 minuto de intervalo, e a DAG está agendada para rodar mensalmente (`@monthly`, sem *catchup*). Se uma task falha, as seguintes ficam como `upstream_failed`, então dá pra ver na UI em qual etapa ocorreu o erro.
+
+### Como executar
+
+Requisitos: Docker em execução e o Astro CLI (`brew install astro`). O `.env` da raiz, com `MONGODB_URI` e `NEON_URI`, é injetado automaticamente nos containers.
+
+```bash
+astro dev parse    # valida a DAG (sem erros de import)
+astro dev pytest   # roda os testes em tests/dags/
+astro dev start    # sobe o Airflow e mostra a URL da UI
+astro dev stop     # encerra os containers
+```
+
+Na UI do Airflow (URL exibida pelo `astro dev start`):
+
+1. Ative a DAG `ibge_pnadc_etl` e clique em **Trigger** para executá-la.
+2. Acompanhe a execução na aba **Grid** (histórico de runs) e na aba **Graph** (ordem e estado das tasks).
+3. Clique em uma task para ver os **Logs**: `validar_neon` mostra, por exemplo, `Validação OK: 58 registros na tabela 'pnadc' do NeonDB`.
+4. Em caso de falha, a task fica vermelha e o log mostra o erro. Depois de corrigir, use **Clear** na task para reexecutá-la a partir dali.
+
 ## Requisitos da entrega
 
 - [x] Implementação em Python com orientação a objetos (`Extract`, `Transformer`, `Loader`).
@@ -82,5 +119,6 @@ sqlite3 data/ibge.db "SELECT * FROM pnadc LIMIT 5;"
 - [x] Credenciais em variáveis de ambiente (`.env`), sem valores de configuração soltos nos métodos.
 - [x] Docstring em todos os métodos públicos.
 - [x] Funcionamento completo testado: resposta bruta na coleção `PNADC` do Atlas e 58 registros na tabela `pnadc` do NeonDB.
+- [x] Pipeline orquestrada no Airflow (Astro CLI): etapas como tasks da DAG `ibge_pnadc_etl`, executadas em ordem pelas dependências e acompanhadas pela UI do Airflow.
 
 
