@@ -1,30 +1,30 @@
 import json
-from typing import Any
-from pathlib import Path
-import os
 import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
-from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
+from src.config import MONGODB_URI, NEON_TABLE, NEON_URI, require
 
-load_dotenv()
 
 class Loader:
     """
-    Responsável por persistir os dados extraídos da API do IBGE (PNADC),
-    seja em um arquivo JSON local, seja em uma coleção do MongoDB.
+    Responsável por persistir os dados da PNADC: o dado bruto no MongoDB
+    (camada bronze) e o DataFrame tratado no NeonDB (ou em SQLite/JSON local).
     """
     
     def __init__(self):
-        self.mongo_uri = os.getenv("MONGODB_URI")
+        self.mongo_uri = require("MONGODB_URI", MONGODB_URI)
         self.client = MongoClient(self.mongo_uri, server_api=ServerApi("1"))
         self.sqlite_path = "data/ibge.db"
         self.sqlite_table = "pnadc"
-        self.neon_uri = os.getenv("NEON_URI")
-        self.neon_table = "pnadc"
+        self.neon_uri = NEON_URI
+        self.neon_table = NEON_TABLE
 
     def close(self) -> None:
         """Encerra a conexão com o MongoDB."""
@@ -51,22 +51,37 @@ class Loader:
             json.dump(data, f, ensure_ascii=False, indent=4)
             
             
-    def load_mongo(self, data: list[dict], db_name: str, collection_name: str) -> None:
+    def load_mongo(
+        self, data: list[dict], db_name: str, collection_name: str
+    ) -> datetime:
         """
-        Insere o resultado da extração em uma coleção do MongoDB.
+        Acrescenta o resultado da extração à coleção do MongoDB (camada
+        bronze), marcando todos os documentos desta carga com o mesmo
+        campo `data_extracao` (UTC). Cargas anteriores não são apagadas.
+        Retorna a `data_extracao` usada.
 
         Atributos:
             data: lista de dicionários retornada pela API do IBGE
             db_name: nome do banco de dados no MongoDB
             collection_name: nome da coleção onde os documentos serão inseridos
         """
+        if not data:
+            raise ValueError("Nenhum dado para gravar no MongoDB")
+
         collection = self.client[db_name][collection_name]
+        collection.create_index("data_extracao")
 
-        collection.delete_many({})
-        if data:
-            collection.insert_many(data)
+        # Precisão de milissegundos, que é a que o MongoDB armazena
+        agora = datetime.now(timezone.utc)
+        data_extracao = agora.replace(microsecond=agora.microsecond // 1000 * 1000)
+        documentos = [{**doc, "data_extracao": data_extracao} for doc in data]
+        collection.insert_many(documentos)
 
-        print(f"Dados inseridos com sucesso na coleção '{collection_name}'!")
+        print(
+            f"{len(documentos)} documento(s) inseridos na coleção '{collection_name}' "
+            f"(data_extracao={data_extracao.isoformat()})"
+        )
+        return data_extracao
 
     def load_sqlite(self, df: pd.DataFrame) -> None:
         """
@@ -91,13 +106,21 @@ class Loader:
         Atributos:
             df: DataFrame já limpo e organizado (saída do Transformer)
         """
-        if not self.neon_uri:
-            raise ValueError("Variável NEON_URI não definida no .env")
-
-        engine = create_engine(self.neon_uri)
+        engine = create_engine(require("NEON_URI", self.neon_uri))
         try:
             df.to_sql(self.neon_table, engine, if_exists="replace", index=False)
         finally:
             engine.dispose()
 
         print(f"Dados salvos com sucesso na tabela '{self.neon_table}' do NeonDB!")
+
+    def count_neon(self) -> int:
+        """Retorna a quantidade de registros da tabela final no NeonDB."""
+        engine = create_engine(require("NEON_URI", self.neon_uri))
+        try:
+            with engine.connect() as conn:
+                return conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{self.neon_table}"')
+                ).scalar_one()
+        finally:
+            engine.dispose()

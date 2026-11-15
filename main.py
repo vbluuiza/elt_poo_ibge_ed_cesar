@@ -2,20 +2,20 @@
 Pipeline ETL da PNAD Contínua (IBGE).
 
 Extrai a série histórica de uma variável da API de agregados do IBGE,
-guarda o resultado bruto no MongoDB, transforma os dados em um DataFrame
-e persiste o resultado final em uma tabela SQLite.
+acrescenta o resultado bruto ao MongoDB Atlas (camada bronze, marcado com
+`data_extracao`), transforma a carga mais recente em um DataFrame e
+persiste o resultado final em uma tabela do NeonDB.
 """
 
 import logging
 
+from src.config import MONGO_COLLECTION, MONGO_DB
 from src.extract import Extract
 from src.load import Loader
 from src.transform import Transformer
 
 VARIAVEL_TAXA_DESOCUPACAO = 4099
 UF_PERNAMBUCO = 26
-MONGO_DB = "IBGE"
-MONGO_COLLECTION = "PNADC"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +38,7 @@ def main() -> None:
         logger.info("Etapa 2/5: salvando dados brutos no MongoDB Atlas")
         loader.load_mongo(raw, MONGO_DB, MONGO_COLLECTION)
 
-        logger.info("Etapa 3/5: recuperando dados do MongoDB Atlas")
+        logger.info("Etapa 3/5: recuperando a carga mais recente do MongoDB Atlas")
         data = extract.extract_collection_from_mongo(MONGO_DB, MONGO_COLLECTION)
 
         logger.info("Etapa 4/5: transformando os dados")
@@ -48,7 +48,15 @@ def main() -> None:
         loader.load_neon(df)
         # loader.load_sqlite(df)
 
-        logger.info("Pipeline concluído com sucesso (%d registros)", len(df))
+        bronze = transformer.contar_registros_brutos(data)
+        final = loader.count_neon()
+        if bronze != final:
+            raise ValueError(f"Bronze tem {bronze} registros, mas o NeonDB tem {final}")
+        logger.info(
+            "Pipeline concluído com sucesso: %d registros na bronze = %d no NeonDB",
+            bronze,
+            final,
+        )
     except Exception:
         logger.exception("Falha na execução do pipeline")
         raise

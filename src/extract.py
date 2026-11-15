@@ -1,11 +1,8 @@
-import os
-
 import requests
-from dotenv import load_dotenv
-from pymongo import MongoClient
+from pymongo import DESCENDING, MongoClient
 from pymongo.server_api import ServerApi
 
-load_dotenv()
+from src.config import MONGODB_URI, require
 
 
 class Extract:
@@ -87,7 +84,7 @@ class Extract:
         self.periodo_inicio_padrao = "201201"
         self.periodo_fim_padrao = "202602"
         self.classificacao_padrao = "2[all]"
-        self.mongo_uri = os.getenv("MONGODB_URI")
+        self.mongo_uri = require("MONGODB_URI", MONGODB_URI)
         self.client = MongoClient(self.mongo_uri, server_api=ServerApi("1"))
 
     def close(self) -> None:
@@ -98,15 +95,32 @@ class Extract:
         self, db_name: str, collection_name: str
     ) -> list[dict]:
         """
-        Recupera do MongoDB Atlas os documentos brutos gravados na etapa
-        de carga, para servirem de entrada da transformação.
+        Recupera do MongoDB Atlas os documentos brutos da carga mais
+        recente (maior `data_extracao`), para servirem de entrada da
+        transformação. Cargas anteriores continuam gravadas na coleção
+        (camada bronze), mas não são lidas.
 
         Atributos:
             db_name: nome do banco de dados no MongoDB
             collection_name: nome da coleção a ser lida
         """
         collection = self.client[db_name][collection_name]
-        return list(collection.find({}, {"_id": 0}))
+
+        mais_recente = collection.find_one(
+            {"data_extracao": {"$exists": True}},
+            {"data_extracao": 1},
+            sort=[("data_extracao", DESCENDING)],
+        )
+        if mais_recente is None:
+            raise ValueError(
+                f"Nenhuma carga com 'data_extracao' na coleção '{collection_name}'"
+            )
+
+        return list(
+            collection.find(
+                {"data_extracao": mais_recente["data_extracao"]}, {"_id": 0}
+            )
+        )
 
     def agregado(
         self,
@@ -138,9 +152,9 @@ class Extract:
             f"{self.base_url}/{agregado_id}/periodos/{periodo_inicio}-{periodo_fim}"
             f"/variaveis/{variavel}?localidades=N3[{estado}]&classificacao={classificacao}"
         )
-        response = requests.get(url)
+        response = requests.get(url, timeout=60)
         response.raise_for_status()
-        
+
         return response.json()
 
     def pnadc(

@@ -1,7 +1,7 @@
 """
 DAG do pipeline ETL da PNAD Contínua (IBGE).
 
-Orquestra no Airflow as mesmas etapas do–`main.py, cada uma como uma task:
+Orquestra no Airflow as mesmas etapas do `main.py`, cada uma como uma task:
 extrai da API do IBGE, grava o dado bruto no MongoDB Atlas, recupera do
 Atlas, transforma em DataFrame, grava no NeonDB e valida a carga.
 """
@@ -12,8 +12,6 @@ from airflow.sdk import dag, task
 
 VARIAVEL_TAXA_DESOCUPACAO = 4099
 UF_PERNAMBUCO = 26
-MONGO_DB = "IBGE"
-MONGO_COLLECTION = "PNADC"
 
 @dag(
     dag_id="ibge_pnadc_etl",
@@ -41,7 +39,8 @@ def ibge_pnadc_etl():
 
     @task
     def carregar_mongo(raw: list[dict]) -> None:
-        """Grava o resultado bruto da API no MongoDB Atlas."""
+        """Acrescenta o resultado bruto da API ao MongoDB Atlas, com `data_extracao`."""
+        from src.config import MONGO_COLLECTION, MONGO_DB
         from src.load import Loader
 
         loader = Loader()
@@ -52,64 +51,70 @@ def ibge_pnadc_etl():
 
     @task
     def extrair_mongo() -> list[dict]:
-        """Recupera do MongoDB Atlas os documentos brutos gravados na etapa anterior."""
+        """Recupera do MongoDB Atlas os documentos da carga mais recente."""
+        from src.config import MONGO_COLLECTION, MONGO_DB
         from src.extract import Extract
 
         extract = Extract()
         try:
-            return extract.extract_collection_from_mongo(MONGO_DB, MONGO_COLLECTION)
+            docs = extract.extract_collection_from_mongo(MONGO_DB, MONGO_COLLECTION)
         finally:
             extract.close()
+        # datetime -> texto ISO, para trafegar pelo XCom como JSON simples
+        return [{**doc, "data_extracao": doc["data_extracao"].isoformat()} for doc in docs]
 
     @task
-    def transformar(data: list[dict]) -> str:
-        """Transforma os documentos brutos em um DataFrame, serializado em JSON para o XCom."""
+    def transformar(data: list[dict]) -> dict:
+        """Transforma os documentos brutos em DataFrame, serializado em JSON para o XCom."""
         from src.transform import Transformer
 
-        df = Transformer().transform_pnadc(data)
-        return df.to_json(orient="records", date_format="iso")
+        transformer = Transformer()
+        df = transformer.transform_pnadc(data)
+        return {
+            "df_json": df.to_json(orient="records", date_format="iso"),
+            "registros_bronze": transformer.contar_registros_brutos(data),
+        }
 
     @task
-    def carregar_neon(df_json: str) -> int:
-        """Reconstrói o DataFrame e grava no NeonDB, retornando a quantidade de registros."""
+    def carregar_neon(transformado: dict) -> int:
+        """Reconstrói o DataFrame e grava no NeonDB, retornando a quantidade de registros da bronze."""
         from io import StringIO
 
         import pandas as pd
 
         from src.load import Loader
 
-        df = pd.read_json(StringIO(df_json), orient="records")
+        df = pd.read_json(StringIO(transformado["df_json"]), orient="records")
         df["periodo"] = pd.to_datetime(df["periodo"])
-        df["ano"] = df["ano"].astype(str)
+        df["data_extracao"] = pd.to_datetime(df["data_extracao"], utc=True)
 
         loader = Loader()
         try:
             loader.load_neon(df)
         finally:
             loader.close()
-        return len(df)
+        return transformado["registros_bronze"]
 
     @task
-    def validar_neon(registros_carregados: int) -> None:
-        """Confere se a tabela do NeonDB contém a quantidade de registros carregada."""
-        from sqlalchemy import create_engine, text
-
+    def validar_neon(registros_bronze: int) -> None:
+        """Confere se a tabela do NeonDB tem a mesma quantidade de registros da bronze."""
         from src.load import Loader
 
         loader = Loader()
-        loader.close()
-        engine = create_engine(loader.neon_uri)
         try:
-            with engine.connect() as conn:
-                total = conn.execute(text(f"SELECT COUNT(*) FROM {loader.neon_table}")).scalar()
+            total = loader.count_neon()
         finally:
-            engine.dispose()
+            loader.close()
 
-        if total != registros_carregados:
+        if total != registros_bronze:
             raise ValueError(
-                f"Tabela '{loader.neon_table}' tem {total} registros, esperado {registros_carregados}"
+                f"Tabela '{loader.neon_table}' tem {total} registros, "
+                f"mas a carga mais recente da bronze tem {registros_bronze}"
             )
-        print(f"Validação OK: {total} registros na tabela '{loader.neon_table}' do NeonDB")
+        print(
+            f"Validação OK: {total} registros na tabela '{loader.neon_table}' do NeonDB "
+            f"= {registros_bronze} na bronze"
+        )
 
     raw = extrair_api()
     carga_mongo = carregar_mongo(raw)

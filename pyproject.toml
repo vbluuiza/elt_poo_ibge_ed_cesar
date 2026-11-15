@@ -6,9 +6,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pandas>=3.0.6",
+    "plotly>=7.1.0",
     "psycopg2-binary>=2.9.13",
     "pymongo>=4.18.1",
     "python-dotenv>=1.2.3",
     "requests>=2.34.2",
     "sqlalchemy>=2.0.54",
+    "streamlit>=1.67.0",
 ]
