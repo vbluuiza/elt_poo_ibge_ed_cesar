@@ -189,7 +189,21 @@ python -m streamlit run dashboard/app.py
 | ⚖️ Homens × Mulheres | Série por sexo e a diferença Mulheres − Homens (mais recente, quanto mudou desde o início e a média do período). |
 | 🛠️ Caminho do dado | O fluxo API → bronze → prata → produto, com números ao vivo: quantidade de cargas e documentos na bronze (MongoDB), data da última extração, registros e nulos na prata (NeonDB), e uma amostra da tabela. Pensada para a apresentação. |
 
-![Dashboard](docs/dashboard.png)
+**📈 Evolução:** taxa de desocupação de Pernambuco × Nordeste × Brasil, com a lacuna da pandemia (2020–2021) sombreada.
+
+![Aba Evolução](docs/dashboard-evolucao.png)
+
+**🏆 Ranking das UFs:** taxa de informalidade no 2º trimestre de 2026, com Pernambuco em 9º lugar.
+
+![Aba Ranking das UFs](docs/dashboard-ranking.png)
+
+**⚖️ Homens × Mulheres:** desocupação por sexo em Pernambuco.
+
+![Aba Homens × Mulheres](docs/dashboard-homens-mulheres.png)
+
+**🛠️ Caminho do dado:** o fluxo API → bronze → prata → produto, com os números ao vivo do MongoDB e do NeonDB.
+
+![Aba Caminho do dado](docs/dashboard-caminho-do-dado.png)
 
 ## Roteiro da apresentação (caminho do dado)
 
