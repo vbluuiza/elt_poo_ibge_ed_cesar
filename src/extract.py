@@ -76,6 +76,14 @@ class Extract:
         12467: "Coeficiente de variação - Taxa de informalidade das pessoas ocupadas",
         4723: "Pessoas de 14 anos ou mais de idade ocupadas, em situação de informalidade",
         4724: "Coeficiente de variação - Pessoas de 14 anos ou mais de idade ocupadas, em situação de informalidade",
+        4726: "Distribuição percentual das pessoas de 14 anos ou mais de idade ocupadas, em situação de informalidade",
+        4774: "Coeficiente de variação - Distribuição percentual das pessoas ocupadas, em situação de informalidade",
+    }
+
+    NIVEIS_TERRITORIAIS = {
+        "N1": "Brasil",
+        "N2": "Grande Região",
+        "N3": "Unidade da Federação",
     }
 
     def __init__(self):
@@ -125,65 +133,79 @@ class Extract:
     def agregado(
         self,
         agregado_id: int,
-        variavel: int,
-        estado: int,
+        variaveis: list[int],
+        localidades: str,
         periodo_inicio: str,
         periodo_fim: str,
         classificacao: str | None = None,
     ) -> list[dict]:
         """
-        Busca, na API de agregados do IBGE, a série histórica de uma
-        variável de um agregado (tabela) qualquer, para uma UF.
+        Busca, na API de agregados do IBGE, a série histórica de uma ou
+        mais variáveis de um agregado (tabela) qualquer.
 
         Atributos:
             agregado_id: código do agregado (tabela) do IBGE
-            variavel: código da variável do agregado
-            estado: código IBGE da UF (ver `Extract.UFS`)
+            variaveis: códigos das variáveis do agregado
+            localidades: filtro de localidades da API (ex.: "N1[all]|N3[26]")
             periodo_inicio: início do período da série, no formato AAAAMM
             periodo_fim: fim do período da série, no formato AAAAMM
             classificacao: classificação/categoria da consulta (padrão: `self.classificacao_padrao`)
         """
-        if estado not in self.UFS:
-            raise ValueError(f"Código de UF inválido: {estado}")
-
         classificacao = classificacao or self.classificacao_padrao
+        codigos = "|".join(str(v) for v in variaveis)
 
-        url = (
-            f"{self.base_url}/{agregado_id}/periodos/{periodo_inicio}-{periodo_fim}"
-            f"/variaveis/{variavel}?localidades=N3[{estado}]&classificacao={classificacao}"
+        url = f"{self.base_url}/{agregado_id}/periodos/{periodo_inicio}-{periodo_fim}/variaveis/{codigos}"
+        response = requests.get(
+            url,
+            params={"localidades": localidades, "classificacao": classificacao},
+            timeout=120,
         )
-        response = requests.get(url, timeout=60)
         response.raise_for_status()
 
         return response.json()
 
     def pnadc(
         self,
-        variavel: int,
-        estado: int,
+        variaveis: list[int],
+        niveis: list[str] | None = None,
+        estado: int | None = None,
         periodo_inicio: str | None = None,
         periodo_fim: str | None = None,
     ) -> list[dict]:
         """
-        Busca, no agregado da PNAD Contínua, a série histórica de uma
-        variável para uma UF, em um período (por padrão, o definido em
+        Busca, no agregado da PNAD Contínua, a série histórica de uma ou
+        mais variáveis, por sexo, em um período (por padrão, o definido em
         `self.periodo_inicio_padrao` e `self.periodo_fim_padrao`).
 
         Atributos:
-            variavel: código da variável do agregado (ver `Extract.VARIAVEIS_PNADC`)
-            estado: código IBGE da UF (ver `Extract.UFS`)
+            variaveis: códigos das variáveis do agregado (ver `Extract.VARIAVEIS_PNADC`)
+            niveis: níveis territoriais com todas as localidades
+                (ex.: ["N1", "N2", "N3"] = Brasil, Grandes Regiões e UFs)
+            estado: alternativa a `niveis`; código IBGE de uma única UF (ver `Extract.UFS`)
             periodo_inicio: início do período da série, no formato AAAAMM
             periodo_fim: fim do período da série, no formato AAAAMM
         """
-        if variavel not in self.VARIAVEIS_PNADC:
+        invalidas = [v for v in variaveis if v not in self.VARIAVEIS_PNADC]
+        if invalidas:
             raise ValueError(
-                f"Código de variável inválido para o agregado {self.agregado_pnadc}: {variavel}"
+                f"Código(s) de variável inválido(s) para o agregado {self.agregado_pnadc}: {invalidas}"
             )
+
+        if estado is not None:
+            if estado not in self.UFS:
+                raise ValueError(f"Código de UF inválido: {estado}")
+            localidades = f"N3[{estado}]"
+        else:
+            niveis = niveis or ["N3"]
+            invalidos = [n for n in niveis if n not in self.NIVEIS_TERRITORIAIS]
+            if invalidos:
+                raise ValueError(f"Nível territorial inválido: {invalidos}")
+            localidades = "|".join(f"{n}[all]" for n in niveis)
 
         return self.agregado(
             agregado_id=self.agregado_pnadc,
-            variavel=variavel,
-            estado=estado,
+            variaveis=variaveis,
+            localidades=localidades,
             periodo_inicio=periodo_inicio or self.periodo_inicio_padrao,
             periodo_fim=periodo_fim or self.periodo_fim_padrao,
         )

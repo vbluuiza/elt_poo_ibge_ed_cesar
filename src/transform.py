@@ -17,6 +17,15 @@ class Transformer:
     VALORES_AUSENTES = {"", "..", "...", "X"}
     VALOR_ZERO_ABSOLUTO = "-"
 
+    # O primeiro dígito do código IBGE de uma UF indica a Grande Região
+    REGIOES = {
+        "1": "Norte",
+        "2": "Nordeste",
+        "3": "Sudeste",
+        "4": "Sul",
+        "5": "Centro-Oeste",
+    }
+
     def contar_registros_brutos(self, data: list[dict]) -> int:
         """
         Conta quantos pares (série, período) existem no dado bruto, para
@@ -46,11 +55,27 @@ class Transformer:
             return 0.0
         return float(valor)
 
+    def _regiao(self, localidade: dict) -> str | None:
+        """
+        Devolve a Grande Região de uma localidade: o próprio nome, se ela já
+        for uma região; a região da UF, pelo código IBGE; ou None (Brasil).
+
+        Atributos:
+            localidade: dicionário `localidade` de uma série da API
+        """
+        nivel = localidade["nivel"]["id"]
+        if nivel == "N2":
+            return localidade["nome"]
+        if nivel == "N3":
+            return self.REGIOES.get(str(localidade["id"])[0])
+        return None
+
     def transform_pnadc(self, data: list[dict]) -> pd.DataFrame:
         """
         Converte o resultado bruto da API do IBGE (agregado 4093) em um
-        DataFrame com uma linha por variável, categoria, localidade e
-        período, pronto para carga no NeonDB.
+        DataFrame com uma linha por variável, categoria (sexo),
+        localidade (Brasil, Grande Região ou UF) e período, pronto para
+        carga no NeonDB.
 
         Percorre todos os itens das listas `data`, `resultados` e `series`
         (sem índices fixos), para que nenhuma categoria da classificação
@@ -69,16 +94,21 @@ class Transformer:
                     for nome_categoria in classificacao["categoria"].values()
                 }
                 for serie in resultado["series"]:
+                    localidade = serie["localidade"]
+                    regiao = self._regiao(localidade)
                     for periodo, valor in serie["serie"].items():
                         linhas.append(
                             {
                                 "periodo": periodo,
                                 "variavel_id": int(variavel["id"]),
                                 "variavel": variavel["variavel"],
-                                "unidade": variavel["unidade"],
+                                # a API devolve unidade vazia em algumas variáveis (ex.: 12466)
+                                "unidade": variavel.get("unidade") or None,
                                 **categorias,
-                                "uf_id": int(serie["localidade"]["id"]),
-                                "uf": serie["localidade"]["nome"],
+                                "nivel": localidade["nivel"]["nome"],
+                                "localidade_id": int(localidade["id"]),
+                                "localidade": localidade["nome"],
+                                "regiao": regiao,
                                 "valor": self._converter_valor(valor),
                                 "data_extracao": variavel.get("data_extracao"),
                             }

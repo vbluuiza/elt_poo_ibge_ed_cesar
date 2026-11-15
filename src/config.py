@@ -22,6 +22,18 @@ MONGO_DB = "IBGE"
 MONGO_COLLECTION = "PNADC"
 NEON_TABLE = "pnadc"
 
+# O que o pipeline extrai do agregado 4093 (PNAD Contínua), usado por
+# `main.py` e pela DAG do Airflow.
+PNADC_VARIAVEIS = [
+    4099,   # Taxa de desocupação (%)
+    4092,   # Pessoas desocupadas (mil pessoas)
+    4096,   # Taxa de participação na força de trabalho (%)
+    4097,   # Nível da ocupação (%)
+    12466,  # Taxa de informalidade das pessoas ocupadas (%)
+]
+# N1 = Brasil, N2 = Grandes Regiões, N3 = Unidades da Federação
+PNADC_NIVEIS = ["N1", "N2", "N3"]
+
 
 def require(nome: str, valor: str | None) -> str:
     """

@@ -10,8 +10,6 @@ from datetime import datetime, timedelta
 
 from airflow.sdk import dag, task
 
-VARIAVEL_TAXA_DESOCUPACAO = 4099
-UF_PERNAMBUCO = 26
 
 @dag(
     dag_id="ibge_pnadc_etl",
@@ -28,12 +26,13 @@ UF_PERNAMBUCO = 26
 def ibge_pnadc_etl():
     @task
     def extrair_api() -> list[dict]:
-        """Extrai da API do IBGE a série histórica da taxa de desocupação de PE."""
+        """Extrai da API do IBGE as séries dos indicadores configurados em `src/config.py`."""
+        from src.config import PNADC_NIVEIS, PNADC_VARIAVEIS
         from src.extract import Extract
 
         extract = Extract()
         try:
-            return extract.pnadc(variavel=VARIAVEL_TAXA_DESOCUPACAO, estado=UF_PERNAMBUCO)
+            return extract.pnadc(variaveis=PNADC_VARIAVEIS, niveis=PNADC_NIVEIS)
         finally:
             extract.close()
 
@@ -73,11 +72,12 @@ def ibge_pnadc_etl():
         return {
             "df_json": df.to_json(orient="records", date_format="iso"),
             "registros_bronze": transformer.contar_registros_brutos(data),
+            "data_extracao": df["data_extracao"].iloc[0].isoformat(),
         }
 
     @task
-    def carregar_neon(transformado: dict) -> int:
-        """Reconstrói o DataFrame e grava no NeonDB, retornando a quantidade de registros da bronze."""
+    def carregar_neon(transformado: dict) -> dict:
+        """Reconstrói o DataFrame e grava no NeonDB (upsert), repassando os dados para a validação."""
         from io import StringIO
 
         import pandas as pd
@@ -93,16 +93,20 @@ def ibge_pnadc_etl():
             loader.load_neon(df)
         finally:
             loader.close()
-        return transformado["registros_bronze"]
+        return {
+            "registros_bronze": transformado["registros_bronze"],
+            "data_extracao": transformado["data_extracao"],
+        }
 
     @task
-    def validar_neon(registros_bronze: int) -> None:
-        """Confere se a tabela do NeonDB tem a mesma quantidade de registros da bronze."""
+    def validar_neon(carga: dict) -> None:
+        """Confere se o NeonDB tem, desta carga, a mesma quantidade de registros da bronze."""
         from src.load import Loader
 
+        registros_bronze = carga["registros_bronze"]
         loader = Loader()
         try:
-            total = loader.count_neon()
+            total = loader.count_neon(data_extracao=carga["data_extracao"])
         finally:
             loader.close()
 
